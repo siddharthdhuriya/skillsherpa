@@ -101,7 +101,11 @@ export async function getCourses(filter: CourseFilter = {}): Promise<CourseWithR
       .filter((c) => !filter.language || c.language === filter.language)
       .sort((a, b) => (b.external_rating ?? 0) - (a.external_rating ?? 0));
   }
-  const client = await supaPublic();
+  // includeInactive is only ever requested from admin pages/actions (a real
+  // request, never generateStaticParams), and RLS only exposes inactive
+  // rows to an authenticated session — so this specific case needs the
+  // cookie-bound client, not the public one.
+  const client = filter.includeInactive ? await supa() : await supaPublic();
   let query = client.from("courses").select(COURSE_WITH_RELATIONS);
   if (!filter.includeInactive) query = query.eq("is_active", true);
   if (filter.platformId) query = query.eq("platform_id", filter.platformId);

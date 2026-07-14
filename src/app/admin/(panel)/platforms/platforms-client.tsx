@@ -234,7 +234,7 @@ export function PlatformsClient({
                 <input
                   id="p-logo"
                   type="file"
-                  accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                  accept="image/png,image/jpeg,image/webp"
                   className="block w-full text-sm file:mr-3 file:rounded-md file:border file:bg-secondary file:px-3 file:py-1.5 file:text-sm"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
