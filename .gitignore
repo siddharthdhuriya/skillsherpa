@@ -36,6 +36,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Claude Code local settings — permission history may echo commands that
+# included secrets (DB passwords, etc.) typed during the session. Never commit.
+.claude/settings.local.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
