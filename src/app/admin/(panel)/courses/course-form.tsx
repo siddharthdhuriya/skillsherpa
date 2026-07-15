@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { ImageIcon, X } from "lucide-react";
+import { ImageIcon, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CourseCard } from "@/components/course-card";
-import { saveCourse } from "@/app/admin/actions";
+import { fetchCourseMetadataAction, saveCourse } from "@/app/admin/actions";
 import { courseSchema, slugify, type CourseFormValues } from "@/lib/validation";
 import { CURRENCIES, currencySymbol } from "@/lib/currencies";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -43,6 +43,8 @@ export function CourseForm({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [isFetchingMetadata, setIsFetchingMetadata] = useState(false);
   // Storage upload requires a real Supabase project (NEXT_PUBLIC_* env vars
   // are inlined at build time, so this check works in a client component).
   const storageEnabled = isSupabaseConfigured();
@@ -124,6 +126,46 @@ export function CourseForm({
     }
   }
 
+  async function onFetchFromUrl() {
+    if (!sourceUrl.trim()) return;
+    setIsFetchingMetadata(true);
+    try {
+      const result = await fetchCourseMetadataAction(sourceUrl.trim());
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      const data = result.data!;
+      if (data.title) {
+        form.setValue("title", data.title, { shouldValidate: true });
+        if (!form.getFieldState("slug").isDirty) {
+          form.setValue("slug", slugify(data.title));
+        }
+      }
+      if (data.description) form.setValue("description", data.description, { shouldValidate: true });
+      if (data.thumbnailUrl) form.setValue("thumbnail_url", data.thumbnailUrl);
+      if (data.externalRating != null) form.setValue("external_rating", data.externalRating);
+      if (data.reviewCount != null) form.setValue("review_count", data.reviewCount);
+      if (data.language) form.setValue("language", data.language);
+      if (data.duration) form.setValue("duration", data.duration);
+      if (data.priceRange) form.setValue("price_range", data.priceRange, { shouldValidate: true });
+      if (data.priceAmount != null) form.setValue("price_amount", data.priceAmount);
+      if (data.currency) form.setValue("currency", data.currency);
+      if (data.detectedPlatformId) form.setValue("platform_id", data.detectedPlatformId, { shouldValidate: true });
+      form.setValue("enrollment_link", data.sourceUrl, { shouldValidate: true });
+
+      if (data.warnings.length > 0) {
+        data.warnings.forEach((w) => toast.warning(w));
+      } else {
+        toast.success("Course details imported. Review everything before saving.");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not fetch that URL.");
+    } finally {
+      setIsFetchingMetadata(false);
+    }
+  }
+
   function onSubmit(values: CourseFormValues) {
     startTransition(async () => {
       const result = await saveCourse(values, courseId);
@@ -150,6 +192,38 @@ export function CourseForm({
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_360px]">
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5" noValidate>
+        {!courseId && (
+          <div className="space-y-2 rounded-lg border border-dashed p-4">
+            <Label htmlFor="source-url" className="flex items-center gap-1.5">
+              <Sparkles aria-hidden="true" className="size-4 text-primary" />
+              Import from a course URL (optional)
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                id="source-url"
+                type="url"
+                placeholder="https://www.coursera.org/specializations/..."
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+                disabled={isFetchingMetadata}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onFetchFromUrl}
+                disabled={isFetchingMetadata || !sourceUrl.trim()}
+              >
+                {isFetchingMetadata ? "Fetching..." : "Fetch details"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Pulls whatever title, description, rating, and image the course&apos;s own page
+              publishes. Always review the fields below before saving. This never fills in the
+              AI summary; write that yourself in your own words.
+            </p>
+          </div>
+        )}
+
         {field(
           "Title",
           "title",
@@ -338,7 +412,7 @@ export function CourseForm({
                 />
               </label>
               <p className="text-xs text-muted-foreground">
-                Any resolution works — it's automatically cropped to fit a 16:9 box on the site.
+                Any resolution works — it&apos;s automatically cropped to fit a 16:9 box on the site.
                 Leave empty to use a branded gradient tile.
               </p>
             </div>

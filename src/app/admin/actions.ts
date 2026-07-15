@@ -20,6 +20,7 @@ import {
 } from "@/lib/data";
 import { DEMO_ADMIN_COOKIE, isAdminAuthenticated } from "@/lib/admin-auth";
 import { checkDistinctness } from "@/lib/distinctness";
+import { fetchCourseMetadata, type FetchedCourseMetadata } from "@/lib/course-metadata";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import {
   categorySchema,
@@ -132,6 +133,21 @@ function toCourseInput(values: CourseFormValues): CourseInput {
     thumbnail_url: values.thumbnail_url || null,
     is_active: values.is_active,
   };
+}
+
+// Fetches a course's own public page and extracts whatever structured SEO
+// metadata it exposes (JSON-LD Course schema, Open Graph tags) to prefill
+// the "Add course" form. Never touches ai_summary — that stays admin-authored.
+export async function fetchCourseMetadataAction(
+  url: string,
+): Promise<ActionResult<FetchedCourseMetadata>> {
+  try {
+    await requireAdmin();
+    const data = await fetchCourseMetadata(url);
+    return { ok: true, data };
+  } catch (e) {
+    return { ok: false, error: errorMessage(e) };
+  }
 }
 
 export async function saveCourse(
