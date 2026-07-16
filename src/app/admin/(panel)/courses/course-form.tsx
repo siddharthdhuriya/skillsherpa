@@ -57,6 +57,7 @@ export function CourseForm({
       platform_id: "",
       category_id: "",
       subcategory: "",
+      offered_by: "",
       description: "",
       ai_summary: "",
       price_range: "paid" as const,
@@ -86,6 +87,7 @@ export function CourseForm({
       title: watched.title || "Course title",
       slug: watched.slug || "preview",
       subcategory: watched.subcategory || null,
+      offered_by: watched.offered_by || null,
       description: watched.description || "",
       ai_summary: watched.ai_summary || null,
       price_range: watched.price_range ?? "paid",
@@ -143,6 +145,7 @@ export function CourseForm({
         }
       }
       if (data.description) form.setValue("description", data.description, { shouldValidate: true });
+      if (data.offeredBy) form.setValue("offered_by", data.offeredBy);
       if (data.thumbnailUrl) form.setValue("thumbnail_url", data.thumbnailUrl);
       if (data.externalRating != null) form.setValue("external_rating", data.externalRating);
       if (data.reviewCount != null) form.setValue("review_count", data.reviewCount);
@@ -294,6 +297,12 @@ export function CourseForm({
         </div>
 
         {field("Subcategory (optional)", "subcategory", <Input id="subcategory" {...form.register("subcategory")} />)}
+        {field(
+          "Offered by (optional)",
+          "offered_by",
+          <Input id="offered_by" placeholder="e.g. Stanford University and DeepLearning.AI" {...form.register("offered_by")} />,
+          "The institution or organization that created the course, if different from the platform it's sold on.",
+        )}
         {field(
           "Description",
           "description",

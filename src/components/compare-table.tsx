@@ -22,6 +22,10 @@ export function CompareTable({ courses }: { courses: ComparableCourse[] }) {
       render: (c) => <PlatformBadge name={c.platform.name} logoUrl={c.platform.logo_url} />,
     },
     {
+      label: "Offered by",
+      render: (c) => c.offered_by ?? "-",
+    },
+    {
       label: "Price",
       render: (c) => (
         <span className="font-semibold text-primary">

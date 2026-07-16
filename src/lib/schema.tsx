@@ -43,11 +43,16 @@ export function courseSchema(course: CourseWithRelations | PublicCourse): JsonLd
     name: course.title,
     description: course.description,
     url: courseUrl(course),
-    provider: {
-      "@type": "Organization",
-      name: course.platform.name,
-      url: course.platform.website_url,
-    },
+    // Google's Course schema expects `provider` to be the entity that
+    // actually created/teaches the course, not the marketplace it's sold
+    // through. Use offered_by (e.g. "Stanford University and
+    // DeepLearning.AI") when known; url is dropped in that case since
+    // offered_by is free text that may name more than one organization and
+    // has no single canonical URL. Falls back to the affiliate platform
+    // (which does have a real, known URL) when offered_by isn't set.
+    provider: course.offered_by
+      ? { "@type": "Organization", name: course.offered_by }
+      : { "@type": "Organization", name: course.platform.name, url: course.platform.website_url },
     inLanguage: course.language,
     offers: {
       "@type": "Offer",

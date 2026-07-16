@@ -19,8 +19,8 @@ import { bulkImportCourses, type ImportRowResult } from "@/app/admin/actions";
 import { csvRowSchema } from "@/lib/validation";
 
 const TEMPLATE_HEADER =
-  "title,platform,category,subcategory,description,ai_summary,price_range,price_amount,currency,external_rating,review_count,duration,language,enrollment_link";
-const TEMPLATE_EXAMPLE = `"Intro to Data Analysis","Coursera","Data Science","Data Analysis","A 20-character-plus description of what the course covers.","Optional original summary.","paid",29.99,USD,4.5,1200,"12 hours",English,https://www.example-partner.com/course?aff=YOURID`;
+  "title,platform,category,subcategory,offered_by,description,ai_summary,price_range,price_amount,currency,external_rating,review_count,duration,language,enrollment_link";
+const TEMPLATE_EXAMPLE = `"Intro to Data Analysis","Coursera","Data Science","Data Analysis","Example University","A 20-character-plus description of what the course covers.","Optional original summary.","paid",29.99,USD,4.5,1200,"12 hours",English,https://www.example-partner.com/course?aff=YOURID`;
 
 interface PreviewRow {
   rowNumber: number;
@@ -153,8 +153,8 @@ export function ImportClient({
         <CardHeader>
           <CardTitle className="text-base">1. Upload a CSV</CardTitle>
           <CardDescription>
-            Columns: title, platform, category, subcategory, description, ai_summary,
-            price_range (free, paid), price_amount, currency, external_rating,
+            Columns: title, platform, category, subcategory, offered_by, description,
+            ai_summary, price_range (free, paid), price_amount, currency, external_rating,
             review_count, duration, language, enrollment_link. Platform and category are
             matched by name. Slugs are generated automatically.
           </CardDescription>

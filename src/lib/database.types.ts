@@ -33,6 +33,10 @@ export interface Course {
   slug: string;
   category_id: string;
   subcategory: string | null;
+  /** The institution/organization that created and teaches the course
+   * (e.g. "Stanford University and DeepLearning.AI"), distinct from the
+   * affiliate marketplace it's sold through (platform_id, e.g. Coursera). */
+  offered_by: string | null;
   description: string;
   ai_summary: string | null;
   price_range: PriceRange;

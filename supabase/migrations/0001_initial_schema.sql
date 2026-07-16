@@ -47,6 +47,10 @@ create table public.courses (
   slug text not null unique,
   category_id uuid not null references public.categories(id) on delete restrict,
   subcategory text,
+  -- The institution/organization that actually created and teaches the
+  -- course (e.g. "Stanford University and DeepLearning.AI"), distinct from
+  -- the affiliate marketplace it's sold through (platform_id, e.g. Coursera).
+  offered_by text,
   description text not null,
   ai_summary text,
   price_range public.price_range not null default 'paid',

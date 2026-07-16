@@ -29,6 +29,7 @@ export default async function EditCoursePage({
           platform_id: course.platform_id,
           category_id: course.category_id,
           subcategory: course.subcategory ?? "",
+          offered_by: course.offered_by ?? "",
           description: course.description,
           ai_summary: course.ai_summary ?? "",
           price_range: course.price_range,

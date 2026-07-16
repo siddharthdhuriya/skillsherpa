@@ -89,6 +89,9 @@ export default async function CoursePage({
         <h1 className="font-heading max-w-3xl text-3xl font-bold leading-tight sm:text-4xl">
           {course.title}
         </h1>
+        {course.offered_by && (
+          <p className="text-sm text-muted-foreground">Offered by {course.offered_by}</p>
+        )}
         <RatingStars rating={course.external_rating} reviewCount={course.review_count} />
       </div>
 
@@ -122,6 +125,7 @@ export default async function CoursePage({
             <dl className="mt-4 grid gap-x-8 gap-y-4 sm:grid-cols-2">
               {[
                 ["Platform", course.platform.name],
+                ...(course.offered_by ? [["Offered by", course.offered_by]] : []),
                 ["Category", course.category.name],
                 ["Price", price],
                 ["Duration", course.duration ?? "Self-paced"],

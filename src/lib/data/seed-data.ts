@@ -56,8 +56,8 @@ export const seedCategories: Category[] = [
   },
 ];
 
-type SeedCourse = Omit<Course, "id" | "created_at" | "updated_at" | "currency" | "is_active" | "thumbnail_url"> &
-  Partial<Pick<Course, "currency" | "is_active" | "thumbnail_url">>;
+type SeedCourse = Omit<Course, "id" | "created_at" | "updated_at" | "currency" | "is_active" | "thumbnail_url" | "offered_by"> &
+  Partial<Pick<Course, "currency" | "is_active" | "thumbnail_url" | "offered_by">>;
 
 let courseSeq = 0;
 function course(c: SeedCourse): Course {
@@ -67,6 +67,7 @@ function course(c: SeedCourse): Course {
     currency: "USD",
     is_active: true,
     thumbnail_url: null,
+    offered_by: null,
     created_at: NOW,
     updated_at: NOW,
     ...c,
@@ -79,6 +80,7 @@ export const seedCourses: Course[] = [
     platform_id: P("01"), category_id: C("01"), subcategory: "Certifications",
     title: "IBM Data Science Professional Certificate",
     slug: "ibm-data-science-professional-certificate",
+    offered_by: "IBM Skills Network",
     description: "A beginner-friendly professional certificate covering Python, SQL, data visualization, machine learning, and a capstone project with real datasets.",
     ai_summary: "A structured on-ramp into data science that assumes no prior experience. Over roughly four months of part-time study you move from Python basics through SQL, visualization, and applied machine learning, finishing with a portfolio capstone. Strong fit for career changers who want a recognized credential; less useful if you already code daily.",
     price_range: "paid", price_amount: 49, external_rating: 4.6, review_count: 128450,
@@ -109,6 +111,7 @@ export const seedCourses: Course[] = [
     platform_id: P("01"), category_id: C("01"), subcategory: "Machine Learning",
     title: "Machine Learning Specialization",
     slug: "machine-learning-specialization-stanford",
+    offered_by: "Stanford University and DeepLearning.AI",
     description: "A foundational three-course specialization on supervised learning, advanced algorithms, and unsupervised learning, taught with practical labs.",
     ai_summary: "The canonical starting point for machine learning theory taught with unusual clarity. Math is introduced gently but not skipped, and the labs use modern Python tooling. Expect a genuine conceptual foundation rather than a toolkit tour; pair it with a project-based course afterward.",
     price_range: "paid", price_amount: 49, external_rating: 4.9, review_count: 31240,
@@ -141,6 +144,7 @@ export const seedCourses: Course[] = [
     platform_id: P("01"), category_id: C("02"), subcategory: "Frontend",
     title: "Meta Front-End Developer Professional Certificate",
     slug: "meta-front-end-developer-certificate",
+    offered_by: "Meta",
     description: "A professional certificate covering HTML, CSS, JavaScript, React, UX principles, and interview preparation, built by Meta engineers.",
     ai_summary: "A credential-bearing path into frontend work with an unusually practical final third: coding interview prep and a portfolio project reviewed against industry rubrics. The React coverage tracks current practice. Best for job seekers who want structure plus a recognizable certificate.",
     price_range: "paid", price_amount: 49, external_rating: 4.7, review_count: 87320,

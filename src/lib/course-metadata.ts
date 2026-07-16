@@ -19,6 +19,7 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 export interface FetchedCourseMetadata {
   title: string | null;
   description: string | null;
+  offeredBy: string | null;
   thumbnailUrl: string | null; // Supabase Storage URL once re-uploaded, or null
   externalRating: number | null;
   reviewCount: number | null;
@@ -86,6 +87,22 @@ function friendlyDuration(iso: string | undefined): string | null {
 
 function stripHtml(text: string): string {
   return text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Coursera (and some others) conventionally open their meta description with
+// "Offered by <institution>. <rest of description>" — e.g. "Offered by
+// Stanford University and DeepLearning.AI. #BreakIntoAI with...". Pulls that
+// out into its own field and returns the remaining description without it,
+// so the stored description doesn't redundantly repeat what's now a
+// dedicated field.
+function extractOfferedBy(text: string): { offeredBy: string | null; rest: string } {
+  // Non-greedy up to a period FOLLOWED BY WHITESPACE, not just any period —
+  // institution names routinely contain periods with no trailing space
+  // (e.g. "DeepLearning.AI"), which a naive `[^.]+` would stop at instead of
+  // the real end of the sentence.
+  const match = /^Offered by (.+?)\.\s+/i.exec(text);
+  if (!match) return { offeredBy: null, rest: text };
+  return { offeredBy: match[1].trim(), rest: text.slice(match[0].length).trim() };
 }
 
 /** Walks a JSON-LD payload (object, array, or @graph) looking for a Course node. */
@@ -157,7 +174,7 @@ async function reuploadImage(imageUrl: string, warnings: string[]): Promise<stri
 export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCourseMetadata> {
   const warnings: string[] = [];
   const result: FetchedCourseMetadata = {
-    title: null, description: null, thumbnailUrl: null, externalRating: null,
+    title: null, description: null, offeredBy: null, thumbnailUrl: null, externalRating: null,
     reviewCount: null, language: null, duration: null, priceAmount: null,
     priceRange: null, currency: null, detectedPlatformId: null, sourceUrl, warnings,
   };
@@ -230,10 +247,17 @@ export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCou
   });
 
   let jsonLdTitle: string | null = null;
+  let jsonLdProviderName: string | null = null;
   if (course) {
     const c = course as Record<string, unknown>;
     if (typeof c.name === "string") jsonLdTitle = c.name;
-    if (typeof c.description === "string") result.description = stripHtml(c.description);
+    if (typeof c.description === "string") {
+      const { offeredBy, rest } = extractOfferedBy(stripHtml(c.description));
+      result.description = rest;
+      result.offeredBy = offeredBy;
+    }
+    const provider = c.provider as Record<string, unknown> | undefined;
+    if (typeof provider?.name === "string") jsonLdProviderName = provider.name;
     if (typeof c.image === "string") result.thumbnailUrl = c.image;
     else if (Array.isArray(c.image) && typeof c.image[0] === "string") result.thumbnailUrl = c.image[0];
     if (typeof c.inLanguage === "string") result.language = friendlyLanguage(c.inLanguage);
@@ -285,8 +309,13 @@ export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCou
   // 3. Open Graph fallback for anything JSON-LD didn't cover.
   if (!result.description) {
     const ogDesc = $('meta[property="og:description"]').attr("content") ?? $('meta[name="description"]').attr("content");
-    result.description = ogDesc ? stripHtml(ogDesc) : null;
+    if (ogDesc) {
+      const { offeredBy, rest } = extractOfferedBy(stripHtml(ogDesc));
+      result.description = rest;
+      if (!result.offeredBy) result.offeredBy = offeredBy;
+    }
   }
+  if (!result.offeredBy) result.offeredBy = jsonLdProviderName;
   if (!result.thumbnailUrl) {
     result.thumbnailUrl = $('meta[property="og:image"]').attr("content")?.trim() || null;
   }

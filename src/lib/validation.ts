@@ -37,9 +37,16 @@ export const courseSchema = z.object({
     .min(3)
     .max(200)
     .regex(slugPattern, "Use lowercase letters, numbers, and hyphens only"),
-  platform_id: z.string().uuid("Choose a platform"),
-  category_id: z.string().uuid("Choose a category"),
+  // min(1), not .uuid(): these are only ever set by picking a dropdown
+  // option (never freehand-typed), so the real check is "was something
+  // selected". zod's .uuid() strictly validates the RFC 4122 variant
+  // nibble, which rejects the app's own demo-mode seed IDs (e.g.
+  // "11111111-1111-1111-1111-111111111101") even though they're perfectly
+  // valid identifiers here.
+  platform_id: z.string().min(1, "Choose a platform"),
+  category_id: z.string().min(1, "Choose a category"),
   subcategory: z.string().max(100).optional().or(z.literal("")),
+  offered_by: z.string().max(200).optional().or(z.literal("")),
   description: z.string().min(20, "Description must be at least 20 characters").max(2000),
   ai_summary: z.string().max(2000).optional().or(z.literal("")),
   price_range: z.enum(priceRangeValues),
@@ -78,7 +85,7 @@ export const categorySchema = z.object({
     .max(100)
     .regex(slugPattern, "Use lowercase letters, numbers, and hyphens only"),
   description: z.string().max(1000).optional().or(z.literal("")),
-  parent_category_id: z.string().uuid().optional().nullable(),
+  parent_category_id: z.string().min(1).optional().nullable(),
   seo_title: z.string().max(70, "Keep under 70 characters for search snippets").optional().or(z.literal("")),
   seo_description: z.string().max(170, "Keep under 170 characters for search snippets").optional().or(z.literal("")),
 });
@@ -93,6 +100,7 @@ export const csvRowSchema = z.object({
   platform: z.string().min(1, "Platform name is required"),
   category: z.string().min(1, "Category name is required"),
   subcategory: z.string().optional().default(""),
+  offered_by: z.string().optional().default(""),
   description: z.string().min(20),
   ai_summary: z.string().optional().default(""),
   price_range: z.enum(priceRangeValues).default("paid"),
