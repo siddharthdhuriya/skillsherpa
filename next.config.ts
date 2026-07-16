@@ -53,6 +53,13 @@ const nextConfig: NextConfig = {
           { key: "Content-Security-Policy", value: CSP },
         ],
       },
+      {
+        // Belt-and-suspenders on top of the noindex metadata (admin/layout.tsx)
+        // and the robots.txt disallow: an explicit HTTP header some crawlers
+        // respect even when they don't render/parse the page's <meta> tags.
+        source: "/admin/:path*",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
     ];
   },
 };

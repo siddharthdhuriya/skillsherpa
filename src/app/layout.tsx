@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { Figtree, Sora, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
-import { GoogleAnalytics } from "@/components/google-analytics";
-import { CuelinksScript } from "@/components/cuelinks";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
@@ -51,8 +49,6 @@ export default function RootLayout({
           {children}
           <Toaster />
         </ThemeProvider>
-        <GoogleAnalytics />
-        <CuelinksScript />
       </body>
     </html>
   );
