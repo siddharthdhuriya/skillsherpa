@@ -229,9 +229,10 @@ export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCou
     }
   });
 
+  let jsonLdTitle: string | null = null;
   if (course) {
     const c = course as Record<string, unknown>;
-    if (typeof c.name === "string") result.title = c.name;
+    if (typeof c.name === "string") jsonLdTitle = c.name;
     if (typeof c.description === "string") result.description = stripHtml(c.description);
     if (typeof c.image === "string") result.thumbnailUrl = c.image;
     else if (Array.isArray(c.image) && typeof c.image[0] === "string") result.thumbnailUrl = c.image[0];
@@ -263,10 +264,25 @@ export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCou
     warnings.push("No structured course data found on that page; only basic details could be extracted.");
   }
 
-  // 2. Open Graph fallback for anything JSON-LD didn't cover.
-  if (!result.title) {
-    result.title = $('meta[property="og:title"]').attr("content")?.trim() || $("title").first().text().trim() || null;
-  }
+  // 2. Title: prefer the page's own <h1>, since platforms often publish a
+  // shorter/different title in <title>, og:title, and even JSON-LD's "name"
+  // for SEO/social-preview purposes than what's actually shown to visitors
+  // (e.g. Coursera's "Machine Learning Specialization" page has og:title and
+  // JSON-LD name both just say "Machine Learning"). Fall back through
+  // JSON-LD, then Open Graph, then <title>, only if there's no usable H1.
+  const h1Text = $("h1")
+    .toArray()
+    .map((el) => $(el).text().replace(/\s+/g, " ").trim())
+    .find((text) => text.length >= 3);
+  const titleTagText = $("title")
+    .first()
+    .text()
+    .replace(/\s*[|–-]\s*[^|–-]+$/, "") // strip a trailing " | SiteName" / " - SiteName"
+    .trim();
+  result.title =
+    h1Text || jsonLdTitle || $('meta[property="og:title"]').attr("content")?.trim() || titleTagText || null;
+
+  // 3. Open Graph fallback for anything JSON-LD didn't cover.
   if (!result.description) {
     const ogDesc = $('meta[property="og:description"]').attr("content") ?? $('meta[name="description"]').attr("content");
     result.description = ogDesc ? stripHtml(ogDesc) : null;
@@ -277,7 +293,7 @@ export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCou
 
   if (!result.title) throw new Error("Could not find a title on that page.");
 
-  // 3. Match the source domain against your existing affiliate platforms.
+  // 4. Match the source domain against your existing affiliate platforms.
   try {
     const { getAffiliatePlatforms } = await import("@/lib/data");
     const platforms = await getAffiliatePlatforms();
@@ -296,7 +312,7 @@ export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCou
     // platform lookup failing shouldn't block the rest of the extraction
   }
 
-  // 4. Re-host the thumbnail on Supabase Storage so it works with next/image
+  // 5. Re-host the thumbnail on Supabase Storage so it works with next/image
   // (which only trusts your own Storage domain, not arbitrary source sites).
   if (result.thumbnailUrl) {
     const rehosted = await reuploadImage(result.thumbnailUrl, warnings);
