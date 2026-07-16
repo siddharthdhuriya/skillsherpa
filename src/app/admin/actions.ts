@@ -205,11 +205,17 @@ export async function removeCourse(courseId: string): Promise<ActionResult> {
 // Bulk import. Validation happens in the preview step client-side AND here:
 // rows referencing non-affiliate platforms are rejected, never silently
 // imported (the DB trigger is the final backstop).
+//
+// Upsert by slug: a row whose slug matches an existing course updates it
+// (only the fields the CSV carries — thumbnail_url and is_active are left
+// untouched since bulk import has no column for them); anything else
+// creates a new course, using the row's slug if given and free, otherwise
+// one generated from the title.
 // ---------------------------------------------------------------------------
 export interface ImportRowResult {
   row: number;
   title: string;
-  status: "imported" | "failed";
+  status: "created" | "updated" | "failed";
   error?: string;
 }
 
@@ -223,6 +229,7 @@ export async function bulkImportCourses(
       getCategories(),
       getCourses({ includeInactive: true }),
     ]);
+    const bySlug = new Map(existing.map((c) => [c.slug, c]));
     const usedSlugs = new Set(existing.map((c) => c.slug));
     const results: ImportRowResult[] = [];
 
@@ -271,33 +278,41 @@ export async function bulkImportCourses(
         }
       }
 
-      let slug = slugify(row.title);
-      let n = 2;
-      while (usedSlugs.has(slug)) slug = `${slugify(row.title)}-${n++}`;
+      const matched = row.slug ? bySlug.get(row.slug) : undefined;
+
+      const sharedFields = {
+        title: row.title,
+        platform_id: platform.id,
+        category_id: category.id,
+        subcategory: row.subcategory || null,
+        offered_by: row.offered_by || null,
+        description: row.description,
+        ai_summary: row.ai_summary || null,
+        price_range: row.price_range,
+        price_amount: row.price_range === "free" ? null : (row.price_amount ?? null),
+        currency: row.currency || "USD",
+        external_rating: row.external_rating ?? null,
+        review_count: row.review_count ?? null,
+        duration: row.duration || null,
+        language: row.language || "English",
+        enrollment_link: row.enrollment_link,
+      };
 
       try {
-        await createCourse({
-          title: row.title,
-          slug,
-          platform_id: platform.id,
-          category_id: category.id,
-          subcategory: row.subcategory || null,
-          offered_by: row.offered_by || null,
-          description: row.description,
-          ai_summary: row.ai_summary || null,
-          price_range: row.price_range,
-          price_amount: row.price_range === "free" ? null : (row.price_amount ?? null),
-          currency: row.currency || "USD",
-          external_rating: row.external_rating ?? null,
-          review_count: row.review_count ?? null,
-          duration: row.duration || null,
-          language: row.language || "English",
-          enrollment_link: row.enrollment_link,
-          thumbnail_url: null,
-          is_active: true,
-        });
-        usedSlugs.add(slug);
-        results.push({ row: rowNum, title: row.title, status: "imported" });
+        if (matched) {
+          // Update: leave thumbnail_url/is_active untouched (no CSV column
+          // for either), and keep the existing slug rather than the field
+          // computed from the (possibly now-different) title.
+          await updateCourse(matched.id, sharedFields);
+          results.push({ row: rowNum, title: row.title, status: "updated" });
+        } else {
+          let slug = row.slug || slugify(row.title);
+          let n = 2;
+          while (usedSlugs.has(slug)) slug = `${row.slug || slugify(row.title)}-${n++}`;
+          await createCourse({ ...sharedFields, slug, thumbnail_url: null, is_active: true });
+          usedSlugs.add(slug);
+          results.push({ row: rowNum, title: row.title, status: "created" });
+        }
       } catch (e) {
         results.push({ row: rowNum, title: row.title, status: "failed", error: errorMessage(e) });
       }

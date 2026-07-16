@@ -19,8 +19,8 @@ import { bulkImportCourses, type ImportRowResult } from "@/app/admin/actions";
 import { csvRowSchema } from "@/lib/validation";
 
 const TEMPLATE_HEADER =
-  "title,platform,category,subcategory,offered_by,description,ai_summary,price_range,price_amount,currency,external_rating,review_count,duration,language,enrollment_link";
-const TEMPLATE_EXAMPLE = `"Intro to Data Analysis","Coursera","Data Science","Data Analysis","Example University","A 20-character-plus description of what the course covers.","Optional original summary.","paid",29.99,USD,4.5,1200,"12 hours",English,https://www.example-partner.com/course?aff=YOURID`;
+  "slug,title,platform,category,subcategory,offered_by,description,ai_summary,price_range,price_amount,currency,external_rating,review_count,duration,language,enrollment_link";
+const TEMPLATE_EXAMPLE = `"","Intro to Data Analysis","Coursera","Data Science","Data Analysis","Example University","A 20-character-plus description of what the course covers.","Optional original summary.","paid",29.99,USD,4.5,1200,"12 hours",English,https://www.example-partner.com/course?aff=YOURID`;
 
 interface PreviewRow {
   rowNumber: number;
@@ -28,6 +28,8 @@ interface PreviewRow {
   title: string;
   platform: string;
   category: string;
+  action: "create" | "update";
+  matchedTitle?: string;
   status: "valid" | "blocked" | "invalid";
   problems: string[];
 }
@@ -35,14 +37,18 @@ interface PreviewRow {
 export function ImportClient({
   platforms,
   categories,
+  existingCourses,
 }: {
   platforms: { name: string; hasAffiliateProgram: boolean }[];
   categories: { name: string }[];
+  existingCourses: { slug: string; title: string }[];
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<PreviewRow[] | null>(null);
   const [results, setResults] = useState<ImportRowResult[] | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const existingBySlug = new Map(existingCourses.map((c) => [c.slug, c.title]));
 
   function validateRows(rows: Record<string, unknown>[]): PreviewRow[] {
     return rows.map((raw, i) => {
@@ -77,12 +83,17 @@ export function ImportClient({
         problems.push(`Unknown category "${categoryName}". Add it under Categories first.`);
       }
 
+      const slug = String(raw.slug ?? "").trim();
+      const matchedTitle = slug ? existingBySlug.get(slug) : undefined;
+
       return {
         rowNumber: i + 1,
         raw,
         title: String(raw.title ?? "(untitled)"),
         platform: platformName,
         category: categoryName,
+        action: matchedTitle ? "update" : "create",
+        matchedTitle,
         status,
         problems,
       };
@@ -118,8 +129,11 @@ export function ImportClient({
     startTransition(async () => {
       const result = await bulkImportCourses(validRows);
       if (result.ok && result.data) {
-        const imported = result.data.filter((r) => r.status === "imported").length;
-        toast.success(`Imported ${imported} of ${validRows.length} courses. They are live now.`);
+        const created = result.data.filter((r) => r.status === "created").length;
+        const updated = result.data.filter((r) => r.status === "updated").length;
+        toast.success(
+          `${created} created, ${updated} updated (${validRows.length} rows processed). Live now.`,
+        );
         setResults(result.data);
         setPreview(null);
         if (fileInput.current) fileInput.current.value = "";
@@ -144,6 +158,8 @@ export function ImportClient({
         valid: preview.filter((r) => r.status === "valid").length,
         blocked: preview.filter((r) => r.status === "blocked").length,
         invalid: preview.filter((r) => r.status === "invalid").length,
+        creating: preview.filter((r) => r.status === "valid" && r.action === "create").length,
+        updating: preview.filter((r) => r.status === "valid" && r.action === "update").length,
       }
     : null;
 
@@ -153,10 +169,16 @@ export function ImportClient({
         <CardHeader>
           <CardTitle className="text-base">1. Upload a CSV</CardTitle>
           <CardDescription>
-            Columns: title, platform, category, subcategory, offered_by, description,
+            Columns: slug, title, platform, category, subcategory, offered_by, description,
             ai_summary, price_range (free, paid), price_amount, currency, external_rating,
             review_count, duration, language, enrollment_link. Platform and category are
-            matched by name. Slugs are generated automatically.
+            matched by name.
+            <br />
+            <strong>Leave slug blank to create a new course</strong> (a slug is generated from
+            the title automatically). <strong>Fill in an existing course&apos;s slug to update
+            it</strong> instead of creating a duplicate — export your current courses first if
+            you want their exact slugs. Changing the slug column itself doesn&apos;t rename a
+            course; it creates a new one, since slug is how a row is matched to a course.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
@@ -182,10 +204,12 @@ export function ImportClient({
           <CardHeader>
             <CardTitle className="text-base">2. Review before importing</CardTitle>
             <CardDescription>
-              {counts.valid} ready to import
+              {counts.creating > 0 && `${counts.creating} will be created`}
+              {counts.creating > 0 && counts.updating > 0 && ", "}
+              {counts.updating > 0 && `${counts.updating} will be updated`}
               {counts.blocked > 0 && `, ${counts.blocked} blocked (non-affiliate platform)`}
-              {counts.invalid > 0 && `, ${counts.invalid} with errors`}. Only valid rows are
-              imported; nothing is committed until you confirm.
+              {counts.invalid > 0 && `, ${counts.invalid} with errors`}. Nothing is committed
+              until you confirm.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -206,6 +230,7 @@ export function ImportClient({
                     <TableHead>Title</TableHead>
                     <TableHead>Platform</TableHead>
                     <TableHead>Category</TableHead>
+                    <TableHead>Action</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Problems</TableHead>
                   </TableRow>
@@ -217,6 +242,19 @@ export function ImportClient({
                       <TableCell className="max-w-56 truncate font-medium">{row.title}</TableCell>
                       <TableCell>{row.platform}</TableCell>
                       <TableCell>{row.category}</TableCell>
+                      <TableCell>
+                        {row.status !== "invalid" && row.status !== "blocked" ? (
+                          row.action === "update" ? (
+                            <Badge variant="outline" className="border-primary text-primary">
+                              Update: {row.matchedTitle}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline">New course</Badge>
+                          )
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         {row.status === "valid" && <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">Ready</Badge>}
                         {row.status === "blocked" && <Badge variant="destructive">Blocked</Badge>}
@@ -234,7 +272,7 @@ export function ImportClient({
               <Button onClick={onImport} disabled={isPending || counts.valid === 0}>
                 {isPending
                   ? "Importing..."
-                  : `Import ${counts.valid} ${counts.valid === 1 ? "course" : "courses"}`}
+                  : `Import ${counts.valid} ${counts.valid === 1 ? "row" : "rows"}`}
               </Button>
               <Button
                 variant="outline"
@@ -259,11 +297,13 @@ export function ImportClient({
             <ul className="space-y-1 text-sm">
               {results.map((r) => (
                 <li key={r.row} className="flex items-center gap-2">
-                  {r.status === "imported" ? (
-                    <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">Imported</Badge>
-                  ) : (
-                    <Badge variant="destructive">Failed</Badge>
+                  {r.status === "created" && (
+                    <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">Created</Badge>
                   )}
+                  {r.status === "updated" && (
+                    <Badge className="bg-primary text-primary-foreground hover:bg-primary">Updated</Badge>
+                  )}
+                  {r.status === "failed" && <Badge variant="destructive">Failed</Badge>}
                   <span className="font-medium">{r.title}</span>
                   {r.error && <span className="text-xs text-muted-foreground">{r.error}</span>}
                 </li>

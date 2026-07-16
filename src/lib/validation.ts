@@ -95,7 +95,20 @@ export type CategoryFormValues = z.infer<typeof categorySchema>;
 // CSV bulk import row. Platform and category are matched by name (friendlier
 // for a non-technical admin than UUIDs); resolution + affiliate gating happen
 // in the preview step before anything is committed.
+//
+// slug is the update key: a row whose slug matches an existing course
+// updates that course; a blank slug (or one that matches nothing) creates a
+// new course instead. Renaming a course's slug via CSV isn't supported —
+// that would look identical to "create a new course", so slug is treated as
+// a stable identity, not an editable field, in this flow.
 export const csvRowSchema = z.object({
+  slug: z
+    .string()
+    .optional()
+    .default("")
+    .refine((v) => v === "" || slugPattern.test(v), {
+      message: "Slug must be lowercase letters, numbers, and hyphens only",
+    }),
   title: z.string().min(3),
   platform: z.string().min(1, "Platform name is required"),
   category: z.string().min(1, "Category name is required"),
@@ -103,7 +116,10 @@ export const csvRowSchema = z.object({
   offered_by: z.string().optional().default(""),
   description: z.string().min(20),
   ai_summary: z.string().optional().default(""),
-  price_range: z.enum(priceRangeValues).default("paid"),
+  price_range: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() !== "" ? v.trim().toLowerCase() : undefined),
+    z.enum(priceRangeValues),
+  ).default("paid"),
   price_amount: z.coerce.number().min(0).optional().nullable(),
   currency: z
     .string()
