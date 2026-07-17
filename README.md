@@ -149,29 +149,31 @@ can see what happened without checking logs. This runs fully automatically
 `external_rating`, `review_count`, `duration`, `language`,
 `enrollment_link`, plus `status` and `last_synced` for the write-back.
 
-**Setup:**
-1. Go to [console.cloud.google.com](https://console.cloud.google.com), create
-   (or reuse) a project, and enable the **Google Sheets API**.
-2. Create a **Service Account** under IAM & Admin, then generate a JSON key
-   for it.
-3. Open the sheet → **Share** → add the service account's email (from the
-   JSON key, looks like `...@project-id.iam.gserviceaccount.com`) as **Editor**.
-4. Set `GOOGLE_SHEET_ID` (from the sheet's URL), `GOOGLE_SERVICE_ACCOUNT_EMAIL`,
-   and `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` (the JSON key's `private_key`
-   value, `\n` sequences and all) in your environment variables.
-5. Generate a `CRON_SECRET` (`openssl rand -hex 32`) and set it too.
-6. Trigger `POST /api/cron/sync-sheet` on a schedule with that secret as
-   either an `Authorization: Bearer <secret>` header or a `?secret=`
-   query param. Two ways to schedule it:
-   - **GitHub Actions** (recommended — works regardless of Vercel plan):
-     `.github/workflows/sync-course-sheet.yml` runs twice daily already.
-     Just add one repo secret, `SKILLSHERPA_SYNC_URL`, set to
-     `https://<your-domain>/api/cron/sync-sheet?secret=<CRON_SECRET>`
-     (Settings → Secrets and variables → Actions).
-   - **Vercel Cron**: add a `crons` entry to `vercel.json` pointing at
-     `/api/cron/sync-sheet`. Note Vercel's free/Hobby plan has historically
-     limited cron frequency to once a day — check your plan before relying
-     on this for twice-daily runs.
+The route supports two integration modes:
+
+**Push (recommended)** — a Google Apps Script bound to the sheet itself
+POSTs its rows to `/api/cron/sync-sheet` and writes the response back into
+the sheet directly. No Google Cloud service account or API key needed at
+all, since the script runs under your own Google account, which already
+owns the sheet — this sidesteps the `iam.disableServiceAccountKeyCreation`
+organization policy that blocks key creation on many Google Cloud projects.
+Script source and full setup steps: `docs/apps-script/sync.gs`. Short
+version:
+1. Open the sheet → **Extensions → Apps Script**, paste in `sync.gs`.
+2. **Project Settings → Script Properties** → add `CRON_SECRET` set to the
+   same value as the app's `CRON_SECRET` env var.
+3. Run the `setupTriggers` function once (authorize when prompted) — this
+   schedules `syncCourseSheet` to run automatically twice a day.
+
+**Pull (fallback)** — if a service account key *is* available to you, set
+`GOOGLE_SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_EMAIL`, and
+`GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` and the route reads + writes the sheet
+itself via the Sheets API; trigger it with any external scheduler
+(`GET`/`POST /api/cron/sync-sheet`, secret via `Authorization: Bearer` or
+`?secret=`).
+
+Either way, generate a `CRON_SECRET` (`openssl rand -hex 32`) and set it in
+your environment variables — this guards the route regardless of mode.
 
 ## Deploying
 

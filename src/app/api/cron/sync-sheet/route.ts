@@ -3,46 +3,48 @@ import { revalidatePath } from "next/cache";
 import { readSheetRows, writeBackToSheet } from "@/lib/google-sheets";
 import { upsertCourseRows } from "@/lib/course-upsert";
 
-// Scheduled Google Sheets -> course catalog sync. Fully automatic, no human
-// review step (by explicit product decision): a row whose slug matches an
-// existing course updates it, a blank slug creates a new one. Every row's
-// resolved slug + status + timestamp gets written back into the sheet so
-// the admin has visibility into what happened without checking logs.
+// Google Sheet -> course catalog sync. Fully automatic, no human review step
+// (by explicit product decision): a row whose slug matches an existing
+// course updates it, a blank slug creates a new one. The DB trigger is
+// still the final backstop regardless of which mode below is used.
 //
-// Trigger-source-agnostic: works whether it's called by Vercel Cron
-// (sends `Authorization: Bearer $CRON_SECRET` automatically when the env
-// var is named exactly CRON_SECRET) or an external scheduler like a GitHub
-// Actions workflow (curl with the same header, or a ?secret= query param).
-// Prefers the header so the secret doesn't end up in logs/history.
+// Two ways to reach this route, since server-side service-account key
+// creation is disabled by policy on some Google Cloud orgs:
 //
-// Required env vars: CRON_SECRET, GOOGLE_SHEET_ID,
-// GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.
-export async function POST(request: NextRequest) {
-  return handleSync(request);
-}
+//   PUSH (primary): a Google Apps Script bound to the sheet POSTs
+//   `{ rows: [...] }` directly — no Google credentials on our side at all.
+//   The script itself writes slug/status/last_synced back into the sheet
+//   using the JSON response, since it already has native access to its own
+//   bound sheet.
+//
+//   PULL (fallback, if GOOGLE_SERVICE_ACCOUNT_* env vars are set): the
+//   route reads the sheet itself via the Sheets API and writes the results
+//   back server-side. Useful if a service account key is available.
+//
+// Auth is trigger-source-agnostic: the secret can arrive as
+// `Authorization: Bearer <CRON_SECRET>` (what Apps Script's UrlFetchApp and
+// Vercel Cron both send) or a `?secret=` query param.
 
-// GET too: some schedulers (and manual browser testing) are simplest as GET.
-export async function GET(request: NextRequest) {
-  return handleSync(request);
-}
-
-async function handleSync(request: NextRequest) {
+function checkSecret(request: NextRequest): boolean {
   const authHeader = request.headers.get("authorization");
   const bearerSecret = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
   const secret = bearerSecret ?? request.nextUrl.searchParams.get("secret");
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
-    return NextResponse.json({ ok: false, error: "Invalid secret" }, { status: 401 });
+  return Boolean(process.env.CRON_SECRET) && secret === process.env.CRON_SECRET;
+}
+
+async function runSync(pushedRows: Record<string, unknown>[] | null) {
+  const rows = pushedRows ?? (await readSheetRows());
+  if (rows.length === 0) {
+    return NextResponse.json({ ok: true, processed: 0, results: [] });
   }
 
-  try {
-    const rows = await readSheetRows();
-    if (rows.length === 0) {
-      return NextResponse.json({ ok: true, processed: 0, results: [] });
-    }
+  const results = await upsertCourseRows(rows);
+  const now = new Date().toISOString();
 
-    const results = await upsertCourseRows(rows);
-
-    const now = new Date().toISOString();
+  // Pull mode: we read the sheet ourselves, so we also write results back
+  // ourselves. Push mode: the caller (Apps Script) already has the sheet
+  // open and writes results back itself from our JSON response.
+  if (!pushedRows) {
     await writeBackToSheet(
       results.map((r) => ({
         rowIndex: r.row - 1,
@@ -51,15 +53,40 @@ async function handleSync(request: NextRequest) {
         lastSynced: now,
       })),
     );
+  }
 
-    revalidatePath("/", "layout");
+  revalidatePath("/", "layout");
 
-    const summary = {
-      created: results.filter((r) => r.status === "created").length,
-      updated: results.filter((r) => r.status === "updated").length,
-      failed: results.filter((r) => r.status === "failed").length,
-    };
-    return NextResponse.json({ ok: true, processed: results.length, summary, results, at: now });
+  const summary = {
+    created: results.filter((r) => r.status === "created").length,
+    updated: results.filter((r) => r.status === "updated").length,
+    failed: results.filter((r) => r.status === "failed").length,
+  };
+  return NextResponse.json({ ok: true, processed: results.length, summary, results, at: now });
+}
+
+export async function POST(request: NextRequest) {
+  if (!checkSecret(request)) {
+    return NextResponse.json({ ok: false, error: "Invalid secret" }, { status: 401 });
+  }
+  try {
+    const body = await request.json().catch(() => null);
+    const pushedRows = Array.isArray(body?.rows) ? (body.rows as Record<string, unknown>[]) : null;
+    return await runSync(pushedRows);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Sync failed.";
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
+}
+
+// GET: pull mode only (no request body to carry pushed rows), kept for
+// manual browser testing and any scheduler that prefers GET.
+export async function GET(request: NextRequest) {
+  if (!checkSecret(request)) {
+    return NextResponse.json({ ok: false, error: "Invalid secret" }, { status: 401 });
+  }
+  try {
+    return await runSync(null);
   } catch (e) {
     const message = e instanceof Error ? e.message : "Sync failed.";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
