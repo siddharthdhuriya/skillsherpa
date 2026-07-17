@@ -27,6 +27,11 @@ import {
 } from "@/components/ui/table";
 import { removeCategory, saveCategory } from "@/app/admin/actions";
 import { categorySchema, slugify, type CategoryFormValues } from "@/lib/validation";
+import {
+  generateCategoryDescription,
+  generateCategorySeoDescription,
+  generateCategorySeoTitle,
+} from "@/lib/seo-templates";
 import type { Category } from "@/lib/database.types";
 
 export function CategoriesClient({
@@ -162,13 +167,36 @@ export function CategoriesClient({
                 id="c-name"
                 {...form.register("name", {
                   onChange: (e) => {
-                    if (editing === "new" && !form.getFieldState("slug").isDirty) {
+                    if (editing !== "new") return;
+                    const name = e.target.value.trim();
+                    if (!form.getFieldState("slug").isDirty) {
                       form.setValue("slug", slugify(e.target.value));
+                    }
+                    if (!name) return;
+                    // Auto-generate the description and SEO fields so an
+                    // admin only has to type a name; each stays overridable
+                    // (same "isDirty" guard as slug) if they want to tweak it.
+                    if (!form.getFieldState("description").isDirty) {
+                      form.setValue("description", generateCategoryDescription(name));
+                    }
+                    if (!form.getFieldState("seo_title").isDirty) {
+                      form.setValue("seo_title", generateCategorySeoTitle(name), { shouldValidate: true });
+                    }
+                    if (!form.getFieldState("seo_description").isDirty) {
+                      form.setValue("seo_description", generateCategorySeoDescription(name), {
+                        shouldValidate: true,
+                      });
                     }
                   },
                 })}
               />
               {err.name && <p className="text-xs text-destructive">{err.name.message}</p>}
+              {editing === "new" && !err.name && (
+                <p className="text-xs text-muted-foreground">
+                  Slug, description, and SEO fields below fill in automatically. Edit any of them
+                  before saving if you want something different.
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="c-slug">Slug</Label>
