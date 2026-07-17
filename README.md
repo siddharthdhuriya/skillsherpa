@@ -131,6 +131,47 @@ is fully exercisable in this mode.
 | `NEXT_PUBLIC_SITE_URL` | yes | Canonical origin used in metadata, sitemap, and JSON-LD (e.g. `https://skillsherpa.in`) |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | optional | Google Analytics 4 Measurement ID (`G-XXXXXXX`); omit to run without GA |
 | `REVALIDATION_SECRET` | for live data | Guards `/api/revalidate`. Generate a real value (`openssl rand -hex 32`) — never use the placeholder in production |
+| `GOOGLE_SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`, `CRON_SECRET` | optional | Google Sheets course sync — see below |
+
+## Google Sheets course sync
+
+Courses can be managed from a Google Sheet instead of (or alongside) the
+admin panel: add a row to create a course, edit a row (matched by its
+`slug` column) to update one. A scheduled job reads the sheet, upserts
+every row through the exact same validation as CSV bulk import, and writes
+the resolved `slug`, `status`, and `last_synced` back into the sheet so you
+can see what happened without checking logs. This runs fully automatically
+— no review step — so double-check a row before saving it in the sheet.
+
+**Sheet columns** (any order, matched by header name): `slug`, `title`,
+`platform`, `category`, `subcategory`, `offered_by`, `description`,
+`ai_summary`, `price_range` (`free`/`paid`), `price_amount`, `currency`,
+`external_rating`, `review_count`, `duration`, `language`,
+`enrollment_link`, plus `status` and `last_synced` for the write-back.
+
+**Setup:**
+1. Go to [console.cloud.google.com](https://console.cloud.google.com), create
+   (or reuse) a project, and enable the **Google Sheets API**.
+2. Create a **Service Account** under IAM & Admin, then generate a JSON key
+   for it.
+3. Open the sheet → **Share** → add the service account's email (from the
+   JSON key, looks like `...@project-id.iam.gserviceaccount.com`) as **Editor**.
+4. Set `GOOGLE_SHEET_ID` (from the sheet's URL), `GOOGLE_SERVICE_ACCOUNT_EMAIL`,
+   and `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` (the JSON key's `private_key`
+   value, `\n` sequences and all) in your environment variables.
+5. Generate a `CRON_SECRET` (`openssl rand -hex 32`) and set it too.
+6. Trigger `POST /api/cron/sync-sheet` on a schedule with that secret as
+   either an `Authorization: Bearer <secret>` header or a `?secret=`
+   query param. Two ways to schedule it:
+   - **GitHub Actions** (recommended — works regardless of Vercel plan):
+     `.github/workflows/sync-course-sheet.yml` runs twice daily already.
+     Just add one repo secret, `SKILLSHERPA_SYNC_URL`, set to
+     `https://<your-domain>/api/cron/sync-sheet?secret=<CRON_SECRET>`
+     (Settings → Secrets and variables → Actions).
+   - **Vercel Cron**: add a `crons` entry to `vercel.json` pointing at
+     `/api/cron/sync-sheet`. Note Vercel's free/Hobby plan has historically
+     limited cron frequency to once a day — check your plan before relying
+     on this for twice-daily runs.
 
 ## Deploying
 

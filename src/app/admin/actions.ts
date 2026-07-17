@@ -12,7 +12,6 @@ import {
   deletePlatform,
   getCategories,
   getCourses,
-  getPlatforms,
   updateCategory,
   updateCourse,
   updatePlatform,
@@ -21,13 +20,12 @@ import {
 import { DEMO_ADMIN_COOKIE, isAdminAuthenticated } from "@/lib/admin-auth";
 import { checkDistinctness } from "@/lib/distinctness";
 import { fetchCourseMetadata, type FetchedCourseMetadata } from "@/lib/course-metadata";
+import { upsertCourseRows, type CourseRowResult } from "@/lib/course-upsert";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import {
   categorySchema,
   courseSchema,
-  csvRowSchema,
   platformSchema,
-  slugify,
   type CategoryFormValues,
   type CourseFormValues,
   type PlatformFormValues,
@@ -202,122 +200,20 @@ export async function removeCourse(courseId: string): Promise<ActionResult> {
 }
 
 // ---------------------------------------------------------------------------
-// Bulk import. Validation happens in the preview step client-side AND here:
-// rows referencing non-affiliate platforms are rejected, never silently
-// imported (the DB trigger is the final backstop).
-//
-// Upsert by slug: a row whose slug matches an existing course updates it
-// (only the fields the CSV carries — thumbnail_url and is_active are left
-// untouched since bulk import has no column for them); anything else
-// creates a new course, using the row's slug if given and free, otherwise
-// one generated from the title.
+// Bulk import. A human reviews a preview client-side before confirming; the
+// actual upsert-by-slug logic lives in lib/course-upsert.ts, shared with the
+// (unattended) Google Sheets sync in api/cron/sync-sheet so both paths get
+// identical validation and affiliate-only gating — the DB trigger is still
+// the final backstop either way.
 // ---------------------------------------------------------------------------
-export interface ImportRowResult {
-  row: number;
-  title: string;
-  status: "created" | "updated" | "failed";
-  error?: string;
-}
+export type ImportRowResult = CourseRowResult;
 
 export async function bulkImportCourses(
   rows: Record<string, unknown>[],
 ): Promise<ActionResult<ImportRowResult[]>> {
   try {
     await requireAdmin();
-    const [platforms, categories, existing] = await Promise.all([
-      getPlatforms(),
-      getCategories(),
-      getCourses({ includeInactive: true }),
-    ]);
-    const bySlug = new Map(existing.map((c) => [c.slug, c]));
-    const usedSlugs = new Set(existing.map((c) => c.slug));
-    const results: ImportRowResult[] = [];
-
-    for (let i = 0; i < rows.length; i++) {
-      const rowNum = i + 1;
-      const parsed = csvRowSchema.safeParse(rows[i]);
-      if (!parsed.success) {
-        results.push({
-          row: rowNum,
-          title: String(rows[i]?.title ?? "(untitled)"),
-          status: "failed",
-          error: parsed.error.issues.map((iss) => `${iss.path.join(".")}: ${iss.message}`).join("; "),
-        });
-        continue;
-      }
-      const row = parsed.data;
-      const platform = platforms.find(
-        (p) => p.name.toLowerCase() === row.platform.trim().toLowerCase(),
-      );
-      const category = categories.find(
-        (c) => c.name.toLowerCase() === row.category.trim().toLowerCase(),
-      );
-      if (!platform) {
-        results.push({ row: rowNum, title: row.title, status: "failed", error: `Unknown platform "${row.platform}"` });
-        continue;
-      }
-      if (!platform.has_affiliate_program) {
-        results.push({
-          row: rowNum,
-          title: row.title,
-          status: "failed",
-          error: `Platform "${platform.name}" has no affiliate partnership; its courses cannot be listed`,
-        });
-        continue;
-      }
-      if (!category) {
-        results.push({ row: rowNum, title: row.title, status: "failed", error: `Unknown category "${row.category}"` });
-        continue;
-      }
-
-      if (row.ai_summary) {
-        const problem = checkDistinctness(row.ai_summary, row.description);
-        if (problem) {
-          results.push({ row: rowNum, title: row.title, status: "failed", error: problem });
-          continue;
-        }
-      }
-
-      const matched = row.slug ? bySlug.get(row.slug) : undefined;
-
-      const sharedFields = {
-        title: row.title,
-        platform_id: platform.id,
-        category_id: category.id,
-        subcategory: row.subcategory || null,
-        offered_by: row.offered_by || null,
-        description: row.description,
-        ai_summary: row.ai_summary || null,
-        price_range: row.price_range,
-        price_amount: row.price_range === "free" ? null : (row.price_amount ?? null),
-        currency: row.currency || "USD",
-        external_rating: row.external_rating ?? null,
-        review_count: row.review_count ?? null,
-        duration: row.duration || null,
-        language: row.language || "English",
-        enrollment_link: row.enrollment_link,
-      };
-
-      try {
-        if (matched) {
-          // Update: leave thumbnail_url/is_active untouched (no CSV column
-          // for either), and keep the existing slug rather than the field
-          // computed from the (possibly now-different) title.
-          await updateCourse(matched.id, sharedFields);
-          results.push({ row: rowNum, title: row.title, status: "updated" });
-        } else {
-          let slug = row.slug || slugify(row.title);
-          let n = 2;
-          while (usedSlugs.has(slug)) slug = `${row.slug || slugify(row.title)}-${n++}`;
-          await createCourse({ ...sharedFields, slug, thumbnail_url: null, is_active: true });
-          usedSlugs.add(slug);
-          results.push({ row: rowNum, title: row.title, status: "created" });
-        }
-      } catch (e) {
-        results.push({ row: rowNum, title: row.title, status: "failed", error: errorMessage(e) });
-      }
-    }
-
+    const results = await upsertCourseRows(rows);
     revalidatePath("/", "layout");
     return { ok: true, data: results };
   } catch (e) {

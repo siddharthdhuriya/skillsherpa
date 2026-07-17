@@ -1,0 +1,33 @@
+name: Sync course sheet
+
+# Triggers the Google Sheets -> course catalog sync twice a day. Runs on
+# GitHub's free-tier Actions minutes rather than Vercel Cron, since Vercel's
+# cron frequency limits vary by plan — this works the same regardless of
+# what plan the site is deployed on.
+#
+# Requires one repo secret: SKILLSHERPA_SYNC_URL, set to
+#   https://skillsherpa.in/api/cron/sync-sheet?secret=<CRON_SECRET>
+# (Settings -> Secrets and variables -> Actions -> New repository secret).
+# Using a secret for the whole URL, not just the token, keeps the CRON_SECRET
+# out of this committed workflow file entirely.
+
+on:
+  schedule:
+    # Times are UTC. 03:00 and 15:00 UTC ~= 08:30 and 20:30 IST — adjust to
+    # taste; cron syntax is "minute hour day month weekday".
+    - cron: "0 3 * * *"
+    - cron: "0 15 * * *"
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the sync endpoint
+        run: |
+          response=$(curl -s -o /tmp/response.json -w "%{http_code}" -X POST "${{ secrets.SKILLSHERPA_SYNC_URL }}")
+          cat /tmp/response.json
+          if [ "$response" -ge 400 ]; then
+            echo "Sync endpoint returned HTTP $response"
+            exit 1
+          fi
