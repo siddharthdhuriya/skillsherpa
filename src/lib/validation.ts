@@ -116,10 +116,15 @@ export const csvRowSchema = z.object({
   offered_by: z.string().optional().default(""),
   description: z.string().min(20),
   ai_summary: z.string().optional().default(""),
+  // preprocess must resolve blank cells straight to "paid" itself, not to
+  // undefined: Apps Script sends blank cells as "" (not a missing key), and
+  // zod's outer .default() only substitutes when the raw field is undefined
+  // — an "" that preprocess turns into undefined internally still fails the
+  // enum check instead of falling through to a default.
   price_range: z.preprocess(
-    (v) => (typeof v === "string" && v.trim() !== "" ? v.trim().toLowerCase() : undefined),
+    (v) => (typeof v === "string" && v.trim() !== "" ? v.trim().toLowerCase() : "paid"),
     z.enum(priceRangeValues),
-  ).default("paid"),
+  ),
   price_amount: z.coerce.number().min(0).optional().nullable(),
   currency: z
     .string()
