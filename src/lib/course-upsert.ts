@@ -28,13 +28,17 @@ export interface CourseRowResult {
   error?: string;
 }
 
+// serviceRole: true for the unauthenticated Sheets sync (CRON_SECRET-gated,
+// no admin session to satisfy RLS); false/omitted for the CSV bulk import,
+// which already runs inside the admin's own authenticated session.
 export async function upsertCourseRows(
   rows: Record<string, unknown>[],
+  opts: { serviceRole?: boolean } = {},
 ): Promise<CourseRowResult[]> {
   const [platforms, categories, existing] = await Promise.all([
     getPlatforms(),
     getCategories(),
-    getCourses({ includeInactive: true }),
+    getCourses({ includeInactive: true, serviceRole: opts.serviceRole }),
   ]);
   const bySlug = new Map(existing.map((c) => [c.slug, c]));
   const usedSlugs = new Set(existing.map((c) => c.slug));
@@ -117,13 +121,16 @@ export async function upsertCourseRows(
         // Update: leave thumbnail_url/is_active untouched (no column for
         // either here), and keep the existing slug rather than recomputing
         // one from a possibly-changed title.
-        await updateCourse(matched.id, sharedFields);
+        await updateCourse(matched.id, sharedFields, { serviceRole: opts.serviceRole });
         results.push({ row: rowNum, title: row.title, status: "updated", slug: matched.slug });
       } else {
         let slug = row.slug || slugify(row.title);
         let n = 2;
         while (usedSlugs.has(slug)) slug = `${row.slug || slugify(row.title)}-${n++}`;
-        await createCourse({ ...sharedFields, slug, thumbnail_url: null, is_active: true });
+        await createCourse(
+          { ...sharedFields, slug, thumbnail_url: null, is_active: true },
+          { serviceRole: opts.serviceRole },
+        );
         usedSlugs.add(slug);
         results.push({ row: rowNum, title: row.title, status: "created", slug });
       }

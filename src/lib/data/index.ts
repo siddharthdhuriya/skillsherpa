@@ -32,6 +32,14 @@ async function supaPublic() {
   return createPublicClient();
 }
 
+// Service-role client: bypasses RLS entirely. Only for callers that already
+// gate access themselves without a Supabase session — see the serviceRole
+// option on createCourse/updateCourse/getCourses above each usage.
+async function supaAdmin() {
+  const { createAdminClient } = await import("@/lib/supabase/admin");
+  return createAdminClient();
+}
+
 function demoJoin(course: Course): CourseWithRelations {
   const store = getDemoStore();
   const platform = store.platforms.find((p) => p.id === course.platform_id)!;
@@ -87,6 +95,9 @@ export interface CourseFilter {
   priceRange?: PriceRange;
   language?: string;
   includeInactive?: boolean;
+  // See the serviceRole note on createCourse/updateCourse — only meaningful
+  // alongside includeInactive, for callers with no Supabase session.
+  serviceRole?: boolean;
 }
 
 export async function getCourses(filter: CourseFilter = {}): Promise<CourseWithRelations[]> {
@@ -101,11 +112,15 @@ export async function getCourses(filter: CourseFilter = {}): Promise<CourseWithR
       .filter((c) => !filter.language || c.language === filter.language)
       .sort((a, b) => (b.external_rating ?? 0) - (a.external_rating ?? 0));
   }
-  // includeInactive is only ever requested from admin pages/actions (a real
-  // request, never generateStaticParams), and RLS only exposes inactive
-  // rows to an authenticated session — so this specific case needs the
-  // cookie-bound client, not the public one.
-  const client = filter.includeInactive ? await supa() : await supaPublic();
+  // includeInactive is only ever requested from admin pages/actions/the
+  // Sheets sync, and RLS only exposes inactive rows to an authenticated
+  // session or the service-role client — so this specific case needs one of
+  // those, not the public one.
+  const client = filter.includeInactive
+    ? filter.serviceRole
+      ? await supaAdmin()
+      : await supa()
+    : await supaPublic();
   let query = client.from("courses").select(COURSE_WITH_RELATIONS);
   if (!filter.includeInactive) query = query.eq("is_active", true);
   if (filter.platformId) query = query.eq("platform_id", filter.platformId);
@@ -297,7 +312,17 @@ async function assertAffiliatePlatform(platformId: string) {
 
 export type CourseInput = Omit<Course, "id" | "created_at" | "updated_at">;
 
-export async function createCourse(input: CourseInput): Promise<Course> {
+// serviceRole: true switches to the service-role client, bypassing RLS.
+// Needed by callers with no Supabase session to inherit — the Google Sheets
+// sync and ratings-refresh cron routes authenticate via CRON_SECRET instead
+// of a logged-in admin cookie, so the normal cookie-bound client's RLS check
+// (auth.role() = 'authenticated') would silently reject every write. The
+// admin form and CSV import don't need this: they run inside the admin's
+// own authenticated browser session already.
+export async function createCourse(
+  input: CourseInput,
+  opts: { serviceRole?: boolean } = {},
+): Promise<Course> {
   await assertAffiliatePlatform(input.platform_id);
   if (!isSupabaseConfigured()) {
     const store = getDemoStore();
@@ -309,13 +334,17 @@ export async function createCourse(input: CourseInput): Promise<Course> {
     store.courses.push(created);
     return created;
   }
-  const client = await supa();
+  const client = opts.serviceRole ? await supaAdmin() : await supa();
   const { data, error } = await client.from("courses").insert(input).select().single();
   if (error) throw error;
   return data;
 }
 
-export async function updateCourse(id: string, input: Partial<CourseInput>): Promise<Course> {
+export async function updateCourse(
+  id: string,
+  input: Partial<CourseInput>,
+  opts: { serviceRole?: boolean } = {},
+): Promise<Course> {
   if (input.platform_id) await assertAffiliatePlatform(input.platform_id);
   if (!isSupabaseConfigured()) {
     const store = getDemoStore();
@@ -324,7 +353,7 @@ export async function updateCourse(id: string, input: Partial<CourseInput>): Pro
     store.courses[idx] = { ...store.courses[idx], ...input, updated_at: new Date().toISOString() };
     return store.courses[idx];
   }
-  const client = await supa();
+  const client = opts.serviceRole ? await supaAdmin() : await supa();
   const { data, error } = await client.from("courses").update(input).eq("id", id).select().single();
   if (error) throw error;
   return data;

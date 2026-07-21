@@ -37,10 +37,14 @@ async function runRefresh() {
       if (externalRating == null && reviewCount == null) {
         unchanged++;
       } else {
-        await updateCourse(course.id, {
-          ...(externalRating != null && { external_rating: externalRating }),
-          ...(reviewCount != null && { review_count: reviewCount }),
-        });
+        await updateCourse(
+          course.id,
+          {
+            ...(externalRating != null && { external_rating: externalRating }),
+            ...(reviewCount != null && { review_count: reviewCount }),
+          },
+          { serviceRole: true },
+        );
         updated++;
       }
     } catch {

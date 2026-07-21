@@ -32,7 +32,7 @@ async function runSync(pushedRows: Record<string, unknown>[] | null) {
     return NextResponse.json({ ok: true, processed: 0, results: [] });
   }
 
-  const results = await upsertCourseRows(rows);
+  const results = await upsertCourseRows(rows, { serviceRole: true });
   const now = new Date().toISOString();
 
   // Pull mode: we read the sheet ourselves, so we also write results back
