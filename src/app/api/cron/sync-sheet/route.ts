@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { readSheetRows, writeBackToSheet } from "@/lib/google-sheets";
 import { upsertCourseRows } from "@/lib/course-upsert";
+import { checkCronSecret } from "@/lib/cron-auth";
 
 // Google Sheet -> course catalog sync. Fully automatic, no human review step
 // (by explicit product decision): a row whose slug matches an existing
@@ -24,13 +25,6 @@ import { upsertCourseRows } from "@/lib/course-upsert";
 // Auth is trigger-source-agnostic: the secret can arrive as
 // `Authorization: Bearer <CRON_SECRET>` (what Apps Script's UrlFetchApp and
 // Vercel Cron both send) or a `?secret=` query param.
-
-function checkSecret(request: NextRequest): boolean {
-  const authHeader = request.headers.get("authorization");
-  const bearerSecret = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  const secret = bearerSecret ?? request.nextUrl.searchParams.get("secret");
-  return Boolean(process.env.CRON_SECRET) && secret === process.env.CRON_SECRET;
-}
 
 async function runSync(pushedRows: Record<string, unknown>[] | null) {
   const rows = pushedRows ?? (await readSheetRows());
@@ -66,7 +60,7 @@ async function runSync(pushedRows: Record<string, unknown>[] | null) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!checkSecret(request)) {
+  if (!checkCronSecret(request)) {
     return NextResponse.json({ ok: false, error: "Invalid secret" }, { status: 401 });
   }
   try {
@@ -82,7 +76,7 @@ export async function POST(request: NextRequest) {
 // GET: pull mode only (no request body to carry pushed rows), kept for
 // manual browser testing and any scheduler that prefers GET.
 export async function GET(request: NextRequest) {
-  if (!checkSecret(request)) {
+  if (!checkCronSecret(request)) {
     return NextResponse.json({ ok: false, error: "Invalid secret" }, { status: 401 });
   }
   try {

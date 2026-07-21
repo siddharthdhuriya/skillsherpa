@@ -8,6 +8,7 @@ import {
   updateCourse,
 } from "@/lib/data";
 import { checkDistinctness } from "@/lib/distinctness";
+import { generateAiSummary } from "@/lib/ai-summary";
 import { csvRowSchema, slugify } from "@/lib/validation";
 
 // Shared upsert-by-slug core, used by both the admin CSV bulk import (a
@@ -76,12 +77,19 @@ export async function upsertCourseRows(
       continue;
     }
 
-    if (row.ai_summary) {
-      const problem = checkDistinctness(row.ai_summary, row.description);
+    let aiSummary = row.ai_summary || null;
+    if (aiSummary) {
+      const problem = checkDistinctness(aiSummary, row.description);
       if (problem) {
         results.push({ row: rowNum, title: row.title, status: "failed", error: problem });
         continue;
       }
+    } else {
+      // Left blank: auto-generate SkillSherpa's own take on the course.
+      // Not fatal if this fails (missing API key, LLM error, or no
+      // sufficiently original result) — the course still gets created/
+      // updated with ai_summary left null.
+      aiSummary = await generateAiSummary(row.title, row.description);
     }
 
     const matched = row.slug ? bySlug.get(row.slug) : undefined;
@@ -93,7 +101,7 @@ export async function upsertCourseRows(
       subcategory: row.subcategory || null,
       offered_by: row.offered_by || null,
       description: row.description,
-      ai_summary: row.ai_summary || null,
+      ai_summary: aiSummary,
       price_range: row.price_range,
       price_amount: row.price_range === "free" ? null : (row.price_amount ?? null),
       currency: row.currency || "USD",

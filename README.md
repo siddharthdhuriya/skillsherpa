@@ -131,7 +131,8 @@ is fully exercisable in this mode.
 | `NEXT_PUBLIC_SITE_URL` | yes | Canonical origin used in metadata, sitemap, and JSON-LD (e.g. `https://skillsherpa.in`) |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | optional | Google Analytics 4 Measurement ID (`G-XXXXXXX`); omit to run without GA |
 | `REVALIDATION_SECRET` | for live data | Guards `/api/revalidate`. Generate a real value (`openssl rand -hex 32`) — never use the placeholder in production |
-| `GOOGLE_SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`, `CRON_SECRET` | optional | Google Sheets course sync — see below |
+| `GOOGLE_SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`, `CRON_SECRET` | optional | Google Sheets course sync and ratings refresh — see below |
+| `ANTHROPIC_API_KEY` | optional | Auto-generates a course's AI summary from its description when left blank — see below |
 
 ## Google Sheets course sync
 
@@ -175,6 +176,35 @@ itself via the Sheets API; trigger it with any external scheduler
 Either way, generate a `CRON_SECRET` (`openssl rand -hex 32`) and set it in
 your environment variables — this guards the route regardless of mode.
 
+## AI summary auto-generation
+
+Whenever a course is saved (admin form, CSV bulk import, or Google Sheets
+sync) with `ai_summary` left blank, one is generated automatically from the
+`description` via the Anthropic API (`ANTHROPIC_API_KEY`) — a short,
+original 2-3 sentence take on who the course is for, written in
+SkillSherpa's own voice rather than a reworded copy of the source
+description. It runs through the same `checkDistinctness()` guard a
+human-written summary must pass (rejecting anything too textually similar to
+the description), retrying the prompt automatically up to 3 times if a
+generation is too close; never em dashes, by prompt instruction and a
+post-processing pass. Typing your own value into the field always takes
+priority — generation only fires when it's empty. If `ANTHROPIC_API_KEY`
+isn't set, or generation can't produce a sufficiently original result after
+retrying, the course still saves fine with `ai_summary` left `null`.
+
+## Rating refresh
+
+`/api/cron/refresh-ratings` re-scrapes `external_rating` and `review_count`
+for every active course from its own `enrollment_link`, the same JSON-LD
+`aggregateRating` extraction used by "Fetch details" in the admin form, just
+without the image/description work that only matters at course-creation
+time. A course is skipped (not zeroed out) if the fetch fails or the source
+page publishes no rating data, so a transient error never overwrites a good
+existing value. Scheduled the same way as the sheet sync — Apps Script
+(`docs/apps-script/sync.gs`, `refreshCourseRatings`) runs it every 2 days;
+`setupTriggers` schedules both jobs together. Auth uses the same
+`CRON_SECRET` as `/api/cron/sync-sheet`.
+
 ## Deploying
 
 The app is built for [Vercel](https://vercel.com) — it gets ISR, edge
@@ -183,8 +213,8 @@ matters directly for Core Web Vitals and therefore SEO ranking.
 
 1. Push this repo to GitHub and import it in Vercel (framework preset:
    Next.js is auto-detected).
-2. Add all six environment variables above under **Project → Settings →
-   Environment Variables** (Production + Preview).
+2. Add the environment variables above (whichever apply) under
+   **Project → Settings → Environment Variables** (Production + Preview).
 3. Add your custom domain under **Project → Domains**, and redirect the
    `www` subdomain to the apex (or vice versa) to avoid duplicate-content
    issues — pick one canonical host and make sure it matches

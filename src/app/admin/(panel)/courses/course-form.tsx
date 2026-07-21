@@ -221,8 +221,8 @@ export function CourseForm({
             </div>
             <p className="text-xs text-muted-foreground">
               Pulls whatever title, description, rating, and image the course&apos;s own page
-              publishes. Always review the fields below before saving. This never fills in the
-              AI summary; write that yourself in your own words.
+              publishes. Always review the fields below before saving. The AI summary is
+              generated automatically from the description if you leave it blank.
             </p>
           </div>
         )}
@@ -313,7 +313,7 @@ export function CourseForm({
           "AI summary (optional)",
           "ai_summary",
           <Textarea id="ai_summary" rows={4} {...form.register("ai_summary")} />,
-          "SkillSherpa's own take on who this course is for. Must be original wording, not the platform's marketing copy.",
+          "SkillSherpa's own take on who this course is for. Leave blank to auto-generate one from the description on save, or write your own original wording (not the platform's marketing copy).",
         )}
 
         <div className="space-y-1.5">

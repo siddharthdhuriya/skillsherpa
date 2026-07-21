@@ -19,6 +19,7 @@ import {
 } from "@/lib/data";
 import { DEMO_ADMIN_COOKIE, isAdminAuthenticated } from "@/lib/admin-auth";
 import { checkDistinctness } from "@/lib/distinctness";
+import { generateAiSummary } from "@/lib/ai-summary";
 import { fetchCourseMetadata, type FetchedCourseMetadata } from "@/lib/course-metadata";
 import { upsertCourseRows, type CourseRowResult } from "@/lib/course-upsert";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -161,6 +162,10 @@ export async function saveCourse(
     if (parsed.ai_summary) {
       const problem = checkDistinctness(parsed.ai_summary, parsed.description);
       if (problem) return { ok: false, error: problem };
+    } else {
+      // Left blank: auto-generate SkillSherpa's own take on the course.
+      // Not fatal if it fails; the course still saves with ai_summary null.
+      parsed.ai_summary = (await generateAiSummary(parsed.title, parsed.description)) ?? "";
     }
     const input = toCourseInput(parsed);
     const saved = courseId

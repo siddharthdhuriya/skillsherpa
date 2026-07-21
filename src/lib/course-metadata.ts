@@ -171,14 +171,7 @@ async function reuploadImage(imageUrl: string, warnings: string[]): Promise<stri
   }
 }
 
-export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCourseMetadata> {
-  const warnings: string[] = [];
-  const result: FetchedCourseMetadata = {
-    title: null, description: null, offeredBy: null, thumbnailUrl: null, externalRating: null,
-    reviewCount: null, language: null, duration: null, priceAmount: null,
-    priceRange: null, currency: null, detectedPlatformId: null, sourceUrl, warnings,
-  };
-
+function validateSourceUrl(sourceUrl: string): URL {
   let parsed: URL;
   try {
     parsed = new URL(sourceUrl);
@@ -191,10 +184,12 @@ export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCou
   if (isBlockedHost(parsed.hostname)) {
     throw new Error("That URL can't be fetched.");
   }
+  return parsed;
+}
 
+async function fetchHtml(sourceUrl: string): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  let html: string;
   try {
     const res = await fetch(sourceUrl, {
       signal: controller.signal,
@@ -209,20 +204,17 @@ export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCou
     });
     if (!res.ok) throw new Error(`The page returned an error (status ${res.status}).`);
     const reader = res.body?.getReader();
-    if (!reader) {
-      html = await res.text();
-    } else {
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        total += value.byteLength;
-        if (total > MAX_RESPONSE_BYTES) throw new Error("The page was too large to process.");
-        chunks.push(value);
-      }
-      html = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
+    if (!reader) return await res.text();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_RESPONSE_BYTES) throw new Error("The page was too large to process.");
+      chunks.push(value);
     }
+    return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {
       throw new Error("The page took too long to respond.");
@@ -231,7 +223,54 @@ export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCou
   } finally {
     clearTimeout(timeout);
   }
+}
 
+function extractAggregateRating(course: Record<string, unknown>): { externalRating: number | null; reviewCount: number | null } {
+  const rating = course.aggregateRating as Record<string, unknown> | undefined;
+  if (!rating) return { externalRating: null, reviewCount: null };
+  const value = Number(rating.ratingValue);
+  const count = Number(rating.reviewCount ?? rating.ratingCount);
+  return {
+    externalRating: Number.isFinite(value) ? Math.round(value * 10) / 10 : null,
+    reviewCount: Number.isFinite(count) ? count : null,
+  };
+}
+
+// Lightweight companion to fetchCourseMetadata() for periodic re-fetching of
+// just rating/review_count on an existing course — skips title/description/
+// image extraction (and the image re-upload that would otherwise re-run on
+// every scheduled refresh) since only the two rating fields are needed.
+export async function fetchCourseRating(
+  sourceUrl: string,
+): Promise<{ externalRating: number | null; reviewCount: number | null }> {
+  validateSourceUrl(sourceUrl);
+  const html = await fetchHtml(sourceUrl);
+  const $ = cheerio.load(html);
+
+  let course: Record<string, unknown> | null = null;
+  $('script[type="application/ld+json"]').each((_, el) => {
+    if (course) return;
+    try {
+      course = findCourseNode(JSON.parse($(el).text()));
+    } catch {
+      // malformed JSON-LD on the source page: skip this block
+    }
+  });
+
+  if (!course) return { externalRating: null, reviewCount: null };
+  return extractAggregateRating(course);
+}
+
+export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCourseMetadata> {
+  const warnings: string[] = [];
+  const result: FetchedCourseMetadata = {
+    title: null, description: null, offeredBy: null, thumbnailUrl: null, externalRating: null,
+    reviewCount: null, language: null, duration: null, priceAmount: null,
+    priceRange: null, currency: null, detectedPlatformId: null, sourceUrl, warnings,
+  };
+
+  const parsed = validateSourceUrl(sourceUrl);
+  const html = await fetchHtml(sourceUrl);
   const $ = cheerio.load(html);
 
   // 1. JSON-LD Course schema (richest source when present).
@@ -267,13 +306,9 @@ export async function fetchCourseMetadata(sourceUrl: string): Promise<FetchedCou
       (instance?.courseWorkload as string) ?? (c.timeRequired as string) ?? undefined;
     result.duration = friendlyDuration(durationSource);
 
-    const rating = c.aggregateRating as Record<string, unknown> | undefined;
-    if (rating) {
-      const value = Number(rating.ratingValue);
-      if (Number.isFinite(value)) result.externalRating = Math.round(value * 10) / 10;
-      const count = Number(rating.reviewCount ?? rating.ratingCount);
-      if (Number.isFinite(count)) result.reviewCount = count;
-    }
+    const { externalRating, reviewCount } = extractAggregateRating(c);
+    result.externalRating = externalRating;
+    result.reviewCount = reviewCount;
 
     const offers = c.offers as Record<string, unknown> | undefined;
     if (offers) {
